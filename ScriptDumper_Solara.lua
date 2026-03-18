@@ -5,17 +5,19 @@ print("[GameAnalyzer] Iniciando...")
 local player = game.Players.LocalPlayer
 local UIS = game:GetService("UserInputService")
 
+local guiParent = gethui and gethui() or game:GetService("CoreGui")
+if not guiParent then guiParent = player:WaitForChild("PlayerGui") end
+
 pcall(function()
-    if game.CoreGui:FindFirstChild("GameAnalyzerGui") then
-        game.CoreGui:FindFirstChild("GameAnalyzerGui"):Destroy()
-    end
+    local existing = guiParent:FindFirstChild("GameAnalyzerGui")
+    if existing then existing:Destroy() end
 end)
 
 -- ============ GUI ============
 local ScreenGui = Instance.new("ScreenGui")
 ScreenGui.Name = "GameAnalyzerGui"
 ScreenGui.ResetOnSpawn = false
-ScreenGui.Parent = game.CoreGui
+ScreenGui.Parent = guiParent
 
 local MainFrame = Instance.new("Frame")
 MainFrame.Parent = ScreenGui
@@ -65,7 +67,7 @@ UIS.InputChanged:Connect(function(input)
 end)
 
 -- Tabs
-local tabNames = {"Estrutura", "Remotes", "Valores", "Objetos 3D", "Player Info"}
+local tabNames = {"Estrutura", "Remotes", "Valores", "Objetos 3D", "Player Info", "Scripts", "Spy"}
 local tabBtns = {}
 local tabContents = {}
 
@@ -73,8 +75,8 @@ for i, name in ipairs(tabNames) do
     local btn = Instance.new("TextButton")
     btn.Parent = MainFrame
     btn.BackgroundColor3 = i == 1 and Color3.fromRGB(80, 50, 160) or Color3.fromRGB(35, 35, 50)
-    btn.Position = UDim2.new(0, 10 + (i-1) * 110, 0, 44)
-    btn.Size = UDim2.new(0, 105, 0, 26)
+    btn.Position = UDim2.new(0, 10 + (i-1) * 95, 0, 44)
+    btn.Size = UDim2.new(0, 90, 0, 26)
     btn.Font = Enum.Font.GothamBold
     btn.Text = name
     btn.TextColor3 = Color3.fromRGB(200, 180, 255)
@@ -146,6 +148,7 @@ end
 local copyBtn = makeBottomBtn("📋 Copiar Aba", 10, Color3.fromRGB(100, 60, 220))
 local copyAllBtn = makeBottomBtn("📋 Copiar Tudo", 150, Color3.fromRGB(70, 45, 150))
 local posBtn = makeBottomBtn("📍 Copiar Pos", 290, Color3.fromRGB(130, 80, 200))
+local saveBtn = makeBottomBtn("💾 Salvar .txt", 430, Color3.fromRGB(50, 130, 80))
 local rejoinBtn = makeBottomBtn("🔄 Rejoin", 760, Color3.fromRGB(160, 40, 40))
 
 -- ============ FUNCOES DE UPDATE ============
@@ -364,7 +367,7 @@ local function scanObjects()
                 local char = obj.Parent
                 local hrp = char:FindFirstChild("HumanoidRootPart") or char:FindFirstChild("Head")
                 local posStr = hrp and string.format("Pos:(%.0f,%.0f,%.0f)", hrp.Position.X, hrp.Position.Y, hrp.Position.Z) or ""
-                appendTab(4, "🤖 " .. char.Name .. " | HP:%.0f/%.0f WalkSpeed:%.0f " .. posStr .. "\n   Path: " .. char:GetFullName() .. "\n\n")
+                appendTab(4, string.format("🤖 %s | HP:%.0f/%.0f WalkSpeed:%.0f %s\n   Path: %s\n\n", char.Name, obj.Health, obj.MaxHealth, obj.WalkSpeed, posStr, char:GetFullName()))
             end
         end)
     end
@@ -462,20 +465,163 @@ local function scanPlayer()
     end)
 end
 
+-- ============ TAB 6: SCRIPTS (decompila codigo fonte) ============
+local function scanScripts()
+    local hasDecompile = decompile ~= nil
+    if not hasDecompile then
+        appendTab(6, "⚠ decompile() nao disponivel neste executor.\nListando scripts sem codigo fonte.\n\n")
+    end
+
+    local scriptCount = 0
+    local function extractScript(obj, path)
+        pcall(function()
+            if obj:IsA("LocalScript") or obj:IsA("ModuleScript") then
+                scriptCount = scriptCount + 1
+                local icon = obj:IsA("LocalScript") and "📜" or "📦"
+                local fullPath = path .. "/" .. obj.Name
+                appendTab(6, "\n" .. string.rep("=", 60) .. "\n")
+                appendTab(6, icon .. " " .. obj.ClassName .. ": " .. obj.Name .. "\n")
+                appendTab(6, "Path: " .. fullPath .. "\n")
+                appendTab(6, string.rep("=", 60) .. "\n")
+
+                if hasDecompile then
+                    local ok, src = pcall(decompile, obj)
+                    if ok and src and #src > 0 then
+                        -- Limita a 3000 chars por script pra nao travar
+                        if #src > 3000 then
+                            appendTab(6, src:sub(1, 3000) .. "\n... [TRUNCADO - " .. #src .. " chars total]\n")
+                        else
+                            appendTab(6, src .. "\n")
+                        end
+                    else
+                        appendTab(6, "-- [ERRO ao decompile ou script vazio]\n")
+                    end
+                else
+                    appendTab(6, "-- [sem decompile disponivel]\n")
+                end
+            end
+            for _, child in pairs(obj:GetChildren()) do
+                extractScript(child, path .. "/" .. obj.Name)
+            end
+        end)
+    end
+
+    local services = {
+        {game:GetService("ReplicatedStorage"), "ReplicatedStorage"},
+        {workspace, "Workspace"},
+    }
+    pcall(function() table.insert(services, {game:GetService("ReplicatedFirst"), "ReplicatedFirst"}) end)
+    pcall(function() table.insert(services, {game:GetService("StarterGui"), "StarterGui"}) end)
+    pcall(function() table.insert(services, {game:GetService("StarterPlayer"), "StarterPlayer"}) end)
+    pcall(function()
+        if player.Character then table.insert(services, {player.Character, "Character"}) end
+    end)
+    pcall(function()
+        local bp = player:FindFirstChild("Backpack")
+        if bp then table.insert(services, {bp, "Backpack"}) end
+    end)
+    pcall(function()
+        local pg = player:FindFirstChild("PlayerGui")
+        if pg then table.insert(services, {pg, "PlayerGui"}) end
+    end)
+
+    for _, svc in ipairs(services) do
+        appendTab(6, "\n>>> " .. svc[2] .. " <<<\n")
+        for _, child in pairs(svc[1]:GetChildren()) do
+            extractScript(child, svc[2])
+        end
+    end
+
+    appendTab(6, "\n--- Total: " .. scriptCount .. " scripts encontrados ---\n")
+end
+
+-- ============ TAB 7: SPY REMOTES (monitora chamadas em tempo real) ============
+local spyEnabled = false
+local spyConnections = {}
+
+local function startSpy()
+    spyEnabled = true
+    appendTab(7, "🟢 Spy ativo - monitorando remotes...\n\n")
+    updateTab(7)
+
+    local function hookRemote(obj, path)
+        pcall(function()
+            if obj:IsA("RemoteEvent") then
+                local oldFire = obj.FireServer
+                local conn
+                conn = hookmetamethod and nil or nil -- fallback
+                -- Usa .OnClientEvent pra ver o que o server manda
+                local c = obj.OnClientEvent:Connect(function(...)
+                    if not spyEnabled then return end
+                    local args = {...}
+                    local argStr = ""
+                    for i, v in ipairs(args) do
+                        argStr = argStr .. tostring(v) .. (i < #args and ", " or "")
+                    end
+                    appendTab(7, string.format("🔴 [%.1f] %s\n   Args: %s\n\n", tick() % 1000, path .. "/" .. obj.Name, argStr))
+                    updateTab(7)
+                end)
+                table.insert(spyConnections, c)
+            elseif obj:IsA("RemoteFunction") then
+                local c = nil
+                pcall(function()
+                    local oldInvoke = obj.OnClientInvoke
+                    obj.OnClientInvoke = function(...)
+                        if spyEnabled then
+                            local args = {...}
+                            local argStr = ""
+                            for i, v in ipairs(args) do
+                                argStr = argStr .. tostring(v) .. (i < #args and ", " or "")
+                            end
+                            appendTab(7, string.format("🟡 [%.1f] %s\n   Args: %s\n\n", tick() % 1000, path .. "/" .. obj.Name, argStr))
+                            updateTab(7)
+                        end
+                        if oldInvoke then return oldInvoke(...) end
+                    end
+                end)
+            end
+        end)
+    end
+
+    local function scanForRemotes(parent, path)
+        for _, obj in pairs(parent:GetChildren()) do
+            pcall(function()
+                hookRemote(obj, path)
+                scanForRemotes(obj, path .. "/" .. obj.Name)
+            end)
+        end
+    end
+
+    scanForRemotes(game:GetService("ReplicatedStorage"), "ReplicatedStorage")
+    scanForRemotes(workspace, "Workspace")
+end
+
+local function stopSpy()
+    spyEnabled = false
+    for _, c in pairs(spyConnections) do pcall(function() c:Disconnect() end) end
+    spyConnections = {}
+    appendTab(7, "\n🔴 Spy desativado.\n")
+    updateTab(7)
+end
+
 -- ============ EXECUTAR SCANS ============
 task.spawn(function()
-    -- Tab 1: Estrutura
-    appendTab(1, "=== WORKSPACE ===\n\n")
-    for _, child in pairs(workspace:GetChildren()) do
-        pcall(function() scanStructure(child, "Workspace", 0, 4) end)
-    end
-    appendTab(1, "\n=== REPLICATED STORAGE ===\n\n")
-    for _, child in pairs(game:GetService("ReplicatedStorage"):GetChildren()) do
-        pcall(function() scanStructure(child, "ReplicatedStorage", 0, 4) end)
-    end
-    appendTab(1, "\n=== STARTER GUI ===\n\n")
-    for _, child in pairs(game:GetService("StarterGui"):GetChildren()) do
-        pcall(function() scanStructure(child, "StarterGui", 0, 3) end)
+    -- Tab 1: Estrutura (mais servicos)
+    local structServices = {
+        {workspace, "Workspace", 4},
+        {game:GetService("ReplicatedStorage"), "ReplicatedStorage", 4},
+        {game:GetService("StarterGui"), "StarterGui", 3},
+    }
+    pcall(function() table.insert(structServices, {game:GetService("ReplicatedFirst"), "ReplicatedFirst", 3}) end)
+    pcall(function() table.insert(structServices, {game:GetService("StarterPlayer"), "StarterPlayer", 3}) end)
+    pcall(function() table.insert(structServices, {game:GetService("Lighting"), "Lighting", 3}) end)
+    pcall(function() table.insert(structServices, {game:GetService("SoundService"), "SoundService", 2}) end)
+
+    for _, svc in ipairs(structServices) do
+        appendTab(1, "\n=== " .. svc[2]:upper() .. " ===\n\n")
+        for _, child in pairs(svc[1]:GetChildren()) do
+            pcall(function() scanStructure(child, svc[2], 0, svc[3]) end)
+        end
     end
     updateTab(1)
 
@@ -495,7 +641,16 @@ task.spawn(function()
     scanPlayer()
     updateTab(5)
 
-    Title.Text = "🔍 Game Analyzer - Concluído! (" .. game:GetService("MarketplaceService"):GetProductInfo(game.PlaceId).Name .. ")"
+    -- Tab 6: Scripts
+    scanScripts()
+    updateTab(6)
+
+    -- Tab 7: Spy (inicia automaticamente)
+    startSpy()
+
+    local gameName = "?"
+    pcall(function() gameName = game:GetService("MarketplaceService"):GetProductInfo(game.PlaceId).Name end)
+    Title.Text = "🔍 Game Analyzer - Concluído! (" .. gameName .. ")"
     Title.TextColor3 = Color3.fromRGB(180, 140, 255)
 end)
 
@@ -540,6 +695,20 @@ posBtn.MouseButton1Click:Connect(function()
     end)
 end)
 
+saveBtn.MouseButton1Click:Connect(function()
+    pcall(function()
+        local all = "-- Game Analyzer Export\n-- Game: " .. game.PlaceId .. "\n-- Data: " .. os.date("%Y-%m-%d %H:%M:%S") .. "\n"
+        for i, name in ipairs(tabNames) do
+            all = all .. "\n\n" .. string.rep("=", 60) .. "\n" .. name:upper() .. "\n" .. string.rep("=", 60) .. "\n\n" .. tabContents[i].data
+        end
+        local fileName = "GameAnalyzer_" .. game.PlaceId .. ".txt"
+        writefile(fileName, all)
+        saveBtn.Text = "✓ Salvo!"
+        task.wait(1)
+        saveBtn.Text = "💾 Salvar .txt"
+    end)
+end)
+
 rejoinBtn.MouseButton1Click:Connect(function()
     game:GetService("TeleportService"):Teleport(game.PlaceId, player)
 end)
@@ -551,4 +720,12 @@ UIS.InputBegan:Connect(function(input, gp)
     end
 end)
 
-print("[GameAnalyzer] Carregado! Z=Mostrar/Esconder")
+-- Toggle Spy com tecla V
+UIS.InputBegan:Connect(function(input, gp)
+    if gp then return end
+    if input.KeyCode == Enum.KeyCode.V then
+        if spyEnabled then stopSpy() else startSpy() end
+    end
+end)
+
+print("[GameAnalyzer] Carregado! Z=Mostrar/Esconder | V=Toggle Spy")
