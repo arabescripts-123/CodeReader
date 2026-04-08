@@ -1,23 +1,21 @@
-local lastVelocity = {}
+-- DETECTOR SIMPLES (SEM BUG)
 
-game:GetService("RunService").Heartbeat:Connect(function()
-    local player = game.Players.LocalPlayer
-    if not player.Character then return end
-    
-    local root = player.Character:FindFirstChild("HumanoidRootPart")
-    if not root then return end
+local player = game.Players.LocalPlayer
+
+while true do
+    task.wait(0.2)
+
+    local char = player.Character
+    if not char then continue end
+
+    local root = char:FindFirstChild("HumanoidRootPart")
+    if not root then continue end
 
     local vel = root.Velocity
 
-    if lastVelocity[player] then
-        local change = (vel - lastVelocity[player]).Magnitude
-
-        if change > 100 then
-            print("🚨 IMPACTO FORTE DETECTADO!")
-            print("Velocidade:", vel)
-            print("Mudança:", change)
-        end
+    if vel.Magnitude > 100 then
+        print("🚨 FORÇA DETECTADA!")
+        print("Velocidade:", vel)
+        print("Magnitude:", vel.Magnitude)
     end
-
-    lastVelocity[player] = vel
-end)
+end
