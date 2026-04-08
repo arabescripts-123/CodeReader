@@ -67,7 +67,7 @@ UIS.InputChanged:Connect(function(input)
 end)
 
 -- Tabs
-local tabNames = {"Códigos/Pos", "Estrutura", "Remotes", "Valores", "Objetos 3D", "Player Info", "Scripts", "Spy", "Script Detector"}
+local tabNames = {"Copy Posição", "Estrutura", "Remotes", "Valores", "Objetos 3D", "Player Info", "Scripts", "Spy", "Script Detector"}
 local tabBtns = {}
 local tabContents = {}
 
@@ -147,7 +147,12 @@ end
 
 local copyBtn = makeBottomBtn("📋 Copiar Aba", 10, Color3.fromRGB(100, 60, 220))
 local copyAllBtn = makeBottomBtn("📋 Copiar Tudo", 150, Color3.fromRGB(70, 45, 150))
-local posBtn = makeBottomBtn("📍 Copiar Pos", 290, Color3.fromRGB(130, 80, 200))
+-- Removido posBtn - agora é Tab1
+local searchBtn = makeBottomBtn("🔍 Buscar", 10, Color3.fromRGB(60, 150, 60))
+local copyAllBtn = makeBottomBtn("📋 Copiar Tudo", 150, Color3.fromRGB(70, 45, 150))
+local helpBtn = makeBottomBtn("?", 290, Color3.fromRGB(255, 200, 0))
+local saveBtn = makeBottomBtn("💾 Salvar", 430, Color3.fromRGB(50, 130, 80))
+local rejoinBtn = makeBottomBtn("🔄 Rejoin", 760, Color3.fromRGB(160, 40, 40))
 local saveBtn = makeBottomBtn("💾 Salvar .txt", 430, Color3.fromRGB(50, 130, 80))
 local rejoinBtn = makeBottomBtn("🔄 Rejoin", 760, Color3.fromRGB(160, 40, 40))
 
