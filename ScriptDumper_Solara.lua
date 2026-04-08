@@ -1,45 +1,31 @@
--- SIMPLE REMOTE LOGGER (SEM ERRO)
+-- FIXED VERSION (SEM ERRO)
 
-print("Spy simples iniciado")
+local player = game.Players.LocalPlayer
+local char = player.Character or player.CharacterAdded:Wait()
 
-local function monitorRemote(obj)
-    if obj:IsA("RemoteEvent") then
+local root = char:WaitForChild("HumanoidRootPart")
+
+for _,plr in pairs(game.Players:GetPlayers()) do
+    if plr ~= player then
         
-        obj.OnClientEvent:Connect(function(...)
-            print("\n📡 RECEBIDO DO SERVIDOR:")
-            print("Remote:", obj:GetFullName())
+        local targetChar = plr.Character
+        if targetChar then
+            
+            local hrp = targetChar:FindFirstChild("HumanoidRootPart")
 
-            local args = {...}
-            for i,v in ipairs(args) do
-                print("Arg",i,":",v)
-            end
-        end)
+            if hrp then
+                local distance = (hrp.Position - root.Position).Magnitude
 
-    elseif obj:IsA("RemoteFunction") then
-        
-        local old = obj.OnClientInvoke
-        obj.OnClientInvoke = function(...)
-            print("\n📞 INVOKE DO SERVIDOR:")
-            print("Remote:", obj:GetFullName())
+                if distance < 10 then
+                    local direction = (hrp.Position - root.Position)
 
-            local args = {...}
-            for i,v in ipairs(args) do
-                print("Arg",i,":",v)
-            end
+                    if direction.Magnitude > 0 then
+                        direction = direction.Unit
 
-            if old then
-                return old(...)
+                        hrp.AssemblyLinearVelocity = direction * 300 + Vector3.new(0,150,0)
+                    end
+                end
             end
         end
     end
 end
-
--- SCAN
-for _,v in pairs(game:GetDescendants()) do
-    monitorRemote(v)
-end
-
--- NOVOS REMOTES
-game.DescendantAdded:Connect(function(v)
-    monitorRemote(v)
-end)
