@@ -67,7 +67,7 @@ UIS.InputChanged:Connect(function(input)
 end)
 
 -- Tabs
-local tabNames = {"Estrutura", "Remotes", "Valores", "Objetos 3D", "Player Info", "Scripts", "Spy"}
+local tabNames = {"Códigos/Pos", "Estrutura", "Remotes", "Valores", "Objetos 3D", "Player Info", "Scripts", "Spy", "Script Detector"}
 local tabBtns = {}
 local tabContents = {}
 
@@ -658,15 +658,20 @@ end)
 local currentTab = 1
 
 for i, btn in ipairs(tabBtns) do
-    btn.MouseButton1Click:Connect(function() currentTab = i; switchTab(i) end)
+    btn.MouseButton1Click:Connect(function() 
+        currentTab = i
+        switchTab(i) 
+    end)
 end
 
 copyBtn.MouseButton1Click:Connect(function()
     pcall(function()
         setclipboard(tabContents[currentTab].data)
         copyBtn.Text = "✓ Copiado!"
+        copyBtn.BackgroundColor3 = Color3.fromRGB(0, 255, 0)
         task.wait(1)
         copyBtn.Text = "📋 Copiar Aba"
+        copyBtn.BackgroundColor3 = Color3.fromRGB(100, 60, 220)
     end)
 end)
 
@@ -718,6 +723,53 @@ UIS.InputBegan:Connect(function(input, gp)
     if input.KeyCode == Enum.KeyCode.Z then
         MainFrame.Visible = not MainFrame.Visible
     end
+end)
+
+-- ========== TAB 8: SCRIPT DETECTOR (detecta novos scripts executados) ==========
+local scriptDetectorEnabled = true
+local detectedScripts = {}
+local detectorConnections = {}
+
+task.spawn(function()
+    appendTab(8, "🔍 Detector ativo - aguardando novos scripts...\n\n")
+    
+    -- Detecta novos LocalScript no PlayerGui/CoreGui
+    local function monitorScripts(parent)
+        for _, obj in pairs(parent:GetDescendants()) do
+            if obj:IsA("LocalScript") then
+                local found = false
+                for _, known in pairs(detectedScripts) do
+                    if known.Source == obj.Source and known.Name == obj.Name then found = true break end
+                end
+                if not found then
+                    local path = obj:GetFullName()
+                    local decompiled = ""
+                    pcall(function()
+                        decompiled = decompile(obj)
+                    end)
+                    table.insert(detectedScripts, {Name = obj.Name, Source = obj.Source, Path = path, Code = decompiled})
+                    appendTab(8, string.format("\n🚨 NOVO SCRIPT DETECTADO!\n📜 %s\n📍 Path: %s\n\n🗳️ CÓDIGO:\n%s\n", obj.Name, path, decompiled:sub(1, 3000)))
+                    updateTab(8)
+                end
+            end
+        end
+    end
+    
+    detectorConnections.PlayerGui = player.PlayerGui.DescendantAdded:Connect(function(obj)
+        if scriptDetectorEnabled and obj:IsA("LocalScript") then monitorScripts(player.PlayerGui) end
+    end)
+    
+    detectorConnections.CoreGui = guiParent.DescendantAdded:Connect(function(obj)
+        if scriptDetectorEnabled and obj:IsA("LocalScript") then monitorScripts(guiParent) end
+    end)
+end)
+
+-- Botão toggle detector
+local detectorBtn = makeBottomBtn("Script Detector", 570, Color3.fromRGB(255, 100, 100))
+detectorBtn.MouseButton1Click:Connect(function()
+    scriptDetectorEnabled = not scriptDetectorEnabled
+    detectorBtn.Text = scriptDetectorEnabled and "Detector ON" or "Detector OFF"
+    detectorBtn.BackgroundColor3 = scriptDetectorEnabled and Color3.fromRGB(100, 255, 100) or Color3.fromRGB(255, 100, 100)
 end)
 
 -- Toggle Spy com tecla V
