@@ -1,60 +1,32 @@
--- KICK BUTTON SCRIPT
+-- SUPER REMOTE SPY (FOCADO EM AÇÕES)
 
-local player = game.Players.LocalPlayer
-local char = player.Character or player.CharacterAdded:Wait()
-local UIS = game:GetService("UserInputService")
+print("Spy iniciado")
 
--- GUI
-local gui = Instance.new("ScreenGui", game.CoreGui)
+local mt = getrawmetatable(game)
+local old = mt.__namecall
 
-local btn = Instance.new("TextButton", gui)
-btn.Size = UDim2.new(0,120,0,50)
-btn.Position = UDim2.new(0,50,0.5,0)
-btn.Text = "CHUTAR"
-btn.BackgroundColor3 = Color3.fromRGB(60,200,60)
+setreadonly(mt,false)
 
--- ANIMAÇÃO (pode trocar se quiser outra)
-local anim = Instance.new("Animation")
-anim.AnimationId = "rbxassetid://522635514" -- animação de chute (padrão Roblox)
+mt.__namecall = newcclosure(function(self,...)
+    local method = getnamecallmethod()
+    local args = {...}
 
-local humanoid = char:WaitForChild("Humanoid")
-local track = humanoid:LoadAnimation(anim)
+    if method == "FireServer" or method == "InvokeServer" then
+        
+        print("\n==============================")
+        print("📡 REMOTE DETECTADO")
+        print("Nome:", self.Name)
+        print("Caminho:", self:GetFullName())
+        print("Método:", method)
 
--- CONTROLE
-local canKick = true
-
-btn.MouseButton1Click:Connect(function()
-    if not canKick then return end
-    canKick = false
-
-    track:Play()
-
-    local root = char:FindFirstChild("HumanoidRootPart")
-
-    -- DETECTAR CONTATO
-    local conn
-    conn = root.Touched:Connect(function(hit)
-        local targetChar = hit.Parent
-        local targetHum = targetChar and targetChar:FindFirstChild("Humanoid")
-
-        if targetHum and targetChar ~= char then
-            local targetRoot = targetChar:FindFirstChild("HumanoidRootPart")
-
-            if targetRoot then
-                -- DIREÇÃO DO CHUTE
-                local direction = (targetRoot.Position - root.Position).Unit
-
-                -- FORÇA
-                targetRoot.Velocity = direction * 100 + Vector3.new(0,50,0)
-            end
+        for i,v in ipairs(args) do
+            print("Arg",i,":",typeof(v), v)
         end
-    end)
 
-    -- tempo do chute
-    task.wait(0.5)
+        print("==============================\n")
+    end
 
-    if conn then conn:Disconnect() end
-
-    task.wait(1)
-    canKick = true
+    return old(self,...)
 end)
+
+setreadonly(mt,true)
