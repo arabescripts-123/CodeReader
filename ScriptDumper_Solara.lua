@@ -5,6 +5,9 @@ print("[GameAnalyzer] Iniciando...")
 local player = game.Players.LocalPlayer
 local UIS = game:GetService("UserInputService")
 
+-- Controle de busca
+local alreadyScanned = false
+
 local guiParent = gethui and gethui() or game:GetService("CoreGui")
 if not guiParent then guiParent = player:WaitForChild("PlayerGui") end
 
@@ -44,7 +47,7 @@ Title.BackgroundTransparency = 1
 Title.Size = UDim2.new(1, -90, 1, 0)
 Title.Position = UDim2.new(0, 12, 0, 0)
 Title.Font = Enum.Font.GothamBold
-Title.Text = "🔍 Game Analyzer - Escaneando..."
+Title.Text = "🔍 Game Analyzer - Clique em Buscar"
 Title.TextColor3 = Color3.fromRGB(200, 180, 255)
 Title.TextSize = 15
 Title.TextXAlignment = Enum.TextXAlignment.Left
@@ -63,6 +66,72 @@ UIS.InputChanged:Connect(function(input)
     if input == dragInput and dragging then
         local d = input.Position - dragStart
         MainFrame.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + d.X, startPos.Y.Scale, startPos.Y.Offset + d.Y)
+    end
+end)
+
+-- ============ BARRA DE PESQUISA (FILTRO) ============
+local SearchFrame = Instance.new("Frame")
+SearchFrame.Parent = MainFrame
+SearchFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 45)
+SearchFrame.Position = UDim2.new(1, -300, 0, 44)
+SearchFrame.Size = UDim2.new(0, 290, 0, 26)
+Instance.new("UICorner", SearchFrame).CornerRadius = UDim.new(0, 6)
+
+local SearchBox = Instance.new("TextBox")
+SearchBox.Parent = SearchFrame
+SearchBox.BackgroundTransparency = 1
+SearchBox.Size = UDim2.new(1, -60, 1, 0)
+SearchBox.Position = UDim2.new(0, 10, 0, 0)
+SearchBox.Font = Enum.Font.Gotham
+SearchBox.PlaceholderText = "🔍 Filtrar..."
+SearchBox.PlaceholderColor3 = Color3.fromRGB(120, 120, 150)
+SearchBox.Text = ""
+SearchBox.TextColor3 = Color3.fromRGB(200, 195, 230)
+SearchBox.TextSize = 12
+SearchBox.TextXAlignment = Enum.TextXAlignment.Left
+
+local ClearFilterBtn = Instance.new("TextButton")
+ClearFilterBtn.Parent = SearchFrame
+ClearFilterBtn.BackgroundColor3 = Color3.fromRGB(80, 50, 160)
+ClearFilterBtn.Position = UDim2.new(1, -50, 0, 3)
+ClearFilterBtn.Size = UDim2.new(0, 44, 0, 20)
+ClearFilterBtn.Font = Enum.Font.GothamBold
+ClearFilterBtn.Text = "✕"
+ClearFilterBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+ClearFilterBtn.TextSize = 12
+ClearFilterBtn.BorderSizePixel = 0
+Instance.new("UICorner", ClearFilterBtn).CornerRadius = UDim.new(0, 4)
+
+ClearFilterBtn.MouseButton1Click:Connect(function()
+    SearchBox.Text = ""
+end)
+
+-- Filtro em tempo real
+SearchBox:GetPropertyChangedSignal("Text"):Connect(function()
+    local filter = SearchBox.Text:lower()
+    if filter == "" then
+        -- Mostrar tudo
+        for i = 1, #tabContents do
+            tabContents[i].text.Text = tabContents[i].data
+        end
+    else
+        -- Filtrar aba atual
+        local currentData = tabContents[currentTab].data
+        local lines = {}
+        for line in currentData:gmatch("[^\n]+") do
+            if line:lower():find(filter, 1, true) then
+                table.insert(lines, line)
+            end
+        end
+        
+        local filtered = table.concat(lines, "\n")
+        if #filtered == 0 then
+            filtered = "<font color='\"#FF6B6B\"'>Nenhum resultado para: \"" .. SearchBox.Text .. "\"</font>"
+        else
+            -- Highlight
+            filtered = filtered:gsub("(" .. filter:lower() .. ")", "<font color='\"#FFD93D\"'><b>$1</b></font>")
+        end
+        tabContents[currentTab].text.Text = filtered
     end
 end)
 
@@ -147,13 +216,9 @@ end
 
 local copyBtn = makeBottomBtn("📋 Copiar Aba", 10, Color3.fromRGB(100, 60, 220))
 local copyAllBtn = makeBottomBtn("📋 Copiar Tudo", 150, Color3.fromRGB(70, 45, 150))
--- Removido posBtn - agora é Tab1
-local searchBtn = makeBottomBtn("🔍 Buscar", 10, Color3.fromRGB(60, 150, 60))
-local copyAllBtn = makeBottomBtn("📋 Copiar Tudo", 150, Color3.fromRGB(70, 45, 150))
-local helpBtn = makeBottomBtn("?", 290, Color3.fromRGB(255, 200, 0))
-local saveBtn = makeBottomBtn("💾 Salvar", 430, Color3.fromRGB(50, 130, 80))
-local rejoinBtn = makeBottomBtn("🔄 Rejoin", 760, Color3.fromRGB(160, 40, 40))
-local saveBtn = makeBottomBtn("💾 Salvar .txt", 430, Color3.fromRGB(50, 130, 80))
+local searchBtn = makeBottomBtn("🔍 Buscar", 290, Color3.fromRGB(60, 150, 60))
+local helpBtn = makeBottomBtn("?", 430, Color3.fromRGB(255, 200, 0))
+local saveBtn = makeBottomBtn("💾 Salvar .txt", 570, Color3.fromRGB(50, 130, 80))
 local rejoinBtn = makeBottomBtn("🔄 Rejoin", 760, Color3.fromRGB(160, 40, 40))
 
 -- ============ FUNCOES DE UPDATE ============
@@ -193,28 +258,377 @@ local function scanStructure(obj, path, indent, maxDepth)
     end
 end
 
--- ============ TAB 2: REMOTES (todos RemoteEvents/Functions com path) ============
+-- ============ SISTEMA DE COMPORTAMENTO (ESSENCIAL) ============
+local behaviorLog = {
+    remotesFired = {},
+    remotesInvoked = {},
+    propertyChanges = {},
+    loopsDetected = {},
+    instancesCreated = {},
+    servicesAccessed = {}
+}
+
+-- Sistema de risco
+local riskScore = 0
+local function addRisk(amount, reason)
+    riskScore += amount
+    appendTab(7, string.format("<font color='\"#FF6B6B\"'>🚨 +%d RISCO: %s</font>\n", amount, reason))
+    updateTab(7)
+end
+
+-- ============ FUNÇÃO SAFE TOSTRING (evita crash) ============
+local function safeToString(v)
+    if v == nil then return "nil"
+    elseif typeof(v) == "string" then return "\"" .. v .. "\""
+    elseif typeof(v) == "Instance" then return "[Instance: " .. v:GetFullName() .. "]"
+    elseif typeof(v) == "Vector3" then return string.format("Vector3(%.2f, %.2f, %.2f)", v.X, v.Y, v.Z)
+    elseif typeof(v) == "CFrame" then return string.format("CFrame(%.2f, %.2f, %.2f)", v.Position.X, v.Position.Y, v.Position.Z)
+    elseif typeof(v) == "Vector2" then return string.format("Vector2(%.2f, %.2f)", v.X, v.Y)
+    elseif typeof(v) == "Color3" then return string.format("Color3(%.2f, %.2f, %.2f)", v.R, v.G, v.B)
+    elseif typeof(v) == "UDim2" then return string.format("UDim2(%s, %s)", tostring(v.X.Scale), tostring(v.X.Offset))
+    elseif typeof(v) == "BrickColor" then return "BrickColor." .. v.Name
+    elseif typeof(v) == "boolean" then return v and "true" or "false"
+    elseif typeof(v) == "number" then 
+        if v == math.floor(v) then return tostring(v)
+        else return string.format("%.4f", v) end
+    elseif typeof(v) == "table" then 
+        local keys = {}
+        for k in pairs(v) do table.insert(keys, tostring(k)) end
+        return "{table: " .. #keys .. " keys}"
+    else return "[" .. typeof(v) .. "]" end
+end
+
+-- ============ INTERCEPTAR FireServer (GAME CHANGER) ============
+local _behaviorHooked = false
+local _playerMonitorConnections = {}
+
+local function setupBehaviorInterceptor()
+    if _behaviorHooked then
+        appendTab(7, "⚠️ Interceptor já ativo\n")
+        updateTab(7)
+        return
+    end
+    
+    pcall(function()
+        local mt = getrawmetatable(game)
+        if not mt then 
+            appendTab(7, "❌ getrawmetatable não disponível\n")
+            updateTab(7)
+            return 
+        end
+        
+        -- Salvar old com segurança
+        local old = mt.__namecall
+        
+        setreadonly(mt, false)
+        
+        mt.__namecall = newcclosure(function(self, ...)
+            local method = getnamecallmethod()
+            local args = {...}
+            
+            -- FireServer
+            if method == "FireServer" then
+                local name = self.Name
+                behaviorLog.remotesFired[name] = (behaviorLog.remotesFired[name] or 0) + 1
+                
+                -- Verifica spam (10+ em 1 segundo = spam)
+                if behaviorLog.remotesFired[name] > 10 then
+                    addRisk(3, string.format("SPAM: %s chamado %dx", name, behaviorLog.remotesFired[name]))
+                end
+                
+                -- Verifica argumentos suspeitos
+                for i, arg in ipairs(args) do
+                    local num = tonumber(arg)
+                    if num and num > 9999 then
+                        addRisk(5, string.format("VALOR EXTREMO: %s arg[%d] = %s", name, i, tostring(num)))
+                    end
+                end
+                
+                -- Log com safeToString
+                local argStr = ""
+                if #args > 0 then
+                    local safeArgs = {}
+                    for i, v in ipairs(args) do
+                        table.insert(safeArgs, safeToString(v))
+                    end
+                    argStr = table.concat(safeArgs, ", ")
+                else
+                    argStr = "(sem args)"
+                end
+                
+                appendTab(7, string.format(
+                    "📡 <font color='\"#FF9500\"'>FireServer:</font> %s | <font color='\"#FFD700\"'>Calls: %d</font> | Args: %s\n",
+                    name, behaviorLog.remotesFired[name], argStr
+                ))
+                updateTab(7)
+                
+            -- InvokeServer
+            elseif method == "InvokeServer" then
+                local name = self.Name
+                behaviorLog.remotesInvoked[name] = (behaviorLog.remotesInvoked[name] or 0) + 1
+                
+                if behaviorLog.remotesInvoked[name] > 5 then
+                    addRisk(2, string.format("InvokeServer spam: %s", name))
+                end
+                
+                local argStr = ""
+                if #args > 0 then
+                    local safeArgs = {}
+                    for i, v in ipairs(args) do
+                        table.insert(safeArgs, safeToString(v))
+                    end
+                    argStr = table.concat(safeArgs, ", ")
+                else
+                    argStr = "(sem args)"
+                end
+                
+                appendTab(7, string.format(
+                    "📞 <font color='\"#00FF7F\"'>InvokeServer:</font> %s | Calls: %d | Args: %s\n",
+                    name, behaviorLog.remotesInvoked[name], argStr
+                ))
+                updateTab(7)
+            end
+            
+            -- Chamar old com segurança
+            if old then
+                return old(self, ...)
+            end
+        end)
+        
+        setreadonly(mt, true)
+        _behaviorHooked = true
+        appendTab(7, "✅ Interceptor de comportamento ativado\n")
+        updateTab(7)
+    end)
+end
+
+-- ============ DETECTAR ALTERAÇÕES NO PLAYER (com cleanup) ============
+local function cleanupPlayerMonitor()
+    for _, conn in pairs(_playerMonitorConnections) do
+        pcall(function() conn:Disconnect() end)
+    end
+    _playerMonitorConnections = {}
+end
+
+local function setupPlayerMonitor()
+    pcall(function()
+        cleanupPlayerMonitor() -- Limpar conexões antigas
+        
+        local function monitorCharacter()
+            cleanupPlayerMonitor() -- Limpar antes de monitorar
+            
+            local char = player.Character
+            if not char then return end
+            
+            local hum = char:FindFirstChildOfClass("Humanoid")
+            if not hum then return end
+            
+            -- WalkSpeed
+            local wsConn = hum:GetPropertyChangedSignal("WalkSpeed"):Connect(function()
+                if hum.WalkSpeed > 50 then
+                    addRisk(10, string.format("⚠️ WALKSPEED EXTREMO: %d (normal: 16)", hum.WalkSpeed))
+                elseif hum.WalkSpeed > 20 then
+                    addRisk(3, string.format("⚠️ WalkSpeed alterado: %d", hum.WalkSpeed))
+                end
+                appendTab(7, string.format("<font color='\"#FF6B6B\"'>⚠️ WalkSpeed alterado: %d</font>\n", hum.WalkSpeed))
+                updateTab(7)
+            end)
+            table.insert(_playerMonitorConnections, wsConn)
+            
+            -- JumpPower
+            local jpConn = hum:GetPropertyChangedSignal("JumpPower"):Connect(function()
+                if hum.JumpPower > 100 then
+                    addRisk(8, string.format("⚠️ JUMPPOWER EXTREMO: %d", hum.JumpPower))
+                elseif hum.JumpPower > 50 then
+                    addRisk(3, string.format("⚠️ JumpPower alterado: %d", hum.JumpPower))
+                end
+                appendTab(7, string.format("<font color='\"#FF6B6B\"'>⚠️ JumpPower alterado: %d</font>\n", hum.JumpPower))
+                updateTab(7)
+            end)
+            table.insert(_playerMonitorConnections, jpConn)
+            
+            -- Health
+            local hpConn = hum:GetPropertyChangedSignal("Health"):Connect(function()
+                if hum.Health > hum.MaxHealth then
+                    addRisk(5, string.format("⚠️ HEALTH EXPLOIT: %.0f/%.0f", hum.Health, hum.MaxHealth))
+                end
+            end)
+            table.insert(_playerMonitorConnections, hpConn)
+            
+            -- Health Max
+            local maxHpConn = hum:GetPropertyChangedSignal("MaxHealth"):Connect(function()
+                if hum.MaxHealth > 1000 then
+                    addRisk(3, string.format("⚠️ MaxHealth alterado: %d", hum.MaxHealth))
+                end
+            end)
+            table.insert(_playerMonitorConnections, maxHpConn)
+            
+            appendTab(7, "✅ Monitor de player ativado\n")
+            updateTab(7)
+        end
+        
+        monitorCharacter()
+        local charConn = player.CharacterAdded:Connect(monitorCharacter)
+        table.insert(_playerMonitorConnections, charConn)
+    end)
+end
+
+-- ============ DETECTAR LOOPS SUSPEITOS (melhorado) ============
+local _loopDetectorRunning = false
+
+local function setupLoopDetector()
+    if _loopDetectorRunning then return end
+    _loopDetectorRunning = true
+    
+    task.spawn(function()
+        local lastTick = tick()
+        local loopCount = 0
+        local loopSamples = {}
+        local thresholds = {
+            {limit = 500, risk = 10, msg = "LOOP EXTREMO"},  -- Muito suspeito
+            {limit = 350, risk = 5, msg = "Loop muito rápido"},
+            {limit = 250, risk = 2, msg = "Loop rápido"},
+        }
+        
+        while _loopDetectorRunning do
+            task.wait(0.01) -- 100Hz sample
+            loopCount += 1
+            
+            local now = tick()
+            if now - lastTick >= 1 then
+                -- Calcular média de loops
+                table.insert(loopSamples, loopCount)
+                if #loopSamples > 10 then table.remove(loopSamples, 1) end
+                
+                local sum = 0
+                for _, v in ipairs(loopSamples) do sum = sum + v end
+                local avgSpeed = sum / #loopSamples
+                
+                -- Verificar thresholds
+                for _, t in ipairs(thresholds) do
+                    if loopCount > t.limit then
+                        addRisk(t.risk, string.format("⚠️ %s: %d iter/seg (média: %.0f)", t.msg, loopCount, avgSpeed))
+                        appendTab(7, string.format("<font color='\"#FF0000\"'>⚠️ %s: %d iter/seg (média: %.0f)</font>\n", t.msg, loopCount, avgSpeed))
+                        updateTab(7)
+                        break
+                    end
+                end
+                
+                loopCount = 0
+                lastTick = now
+            end
+        end
+    end)
+end
+
+-- ============ VARIÁVEIS PARA ANÁLISE ============
+local importantRemotes = {}
+local possibleExploits = {}
+local possibleExploitsCode = {}
+local detectedAntiCheats = {}
+
+-- Palavras-chave para remotes importantes
+local importantKeywords = {
+    "attack", "damage", "hit", "fire", "shoot", "give", "reward",
+    "money", "cash", "coin", "gold", "xp", "level", "exp",
+    "health", "hp", "life", "kill", "death", "respawn",
+    "admin", "mod", "owner", "ban", "kick", "warn",
+    "teleport", "warp", "tp", "goto", "bring",
+    "item", "equip", "inventory", "backpack", "drop",
+    "trade", "transfer", "send", "receive",
+    "vote", "report", "chat", "message",
+    "unlock", "unban", "remove", "delete"
+}
+
+-- Padrões de exploits
+local exploitPatterns = {
+    {name = "AddMoney", pattern = {"money", "cash", "coin", "gold", "currency"}, argType = "number", suggestion = "AddMoney(value)", desc = "Adiciona dinheiro"},
+    {name = "SetMoney", pattern = {"setmoney", "setcash", "setcoins"}, argType = "number", suggestion = "SetMoney(value)", desc = "Define valor de dinheiro"},
+    {name = "AddXP", pattern = {"xp", "exp", "experience", "levelup"}, argType = "number", suggestion = "AddXP(value)", desc = "Adiciona experiência"},
+    {name = "SetHealth", pattern = {"health", "hp", "life", "heal"}, argType = "number", suggestion = "SetHealth(value)", desc = "Define vida"},
+    {name = "Teleport", pattern = {"teleport", "tp", "warp", "goto"}, argType = "any", suggestion = "Teleport(destination)", desc = "Teleporta para local"},
+    {name = "GiveItem", pattern = {"give", "reward", "item", "gift"}, argType = "any", suggestion = "GiveItem(itemId, quantity)", desc = "Dá item ao jogador"},
+    {name = "KickPlayer", pattern = {"kick", "ban", "remove"}, argType = "any", suggestion = "KickPlayer(playerId)", desc = "Expulsa jogador"},
+    {name = "SetLevel", pattern = {"level", "rank", "rankup"}, argType = "number", suggestion = "SetLevel(value)", desc = "Define nível"},
+    {name = "SpeedHack", pattern = {"speed", "walkspeed"}, argType = "number", suggestion = "SetSpeed(value)", desc = "Muda velocidade"},
+    {name = "GodMode", pattern = {"god", "invincible", "immune"}, argType = "nil", suggestion = "GodMode()", desc = "Modo deus"},
+    {name = "NoClip", pattern = {"noclip", "noclip"}, argType = "nil", suggestion = "NoClip()", desc = "Atravessa paredes"},
+    {name = "ESP", pattern = {"esp", "hud", "visual"}, argType = "nil", suggestion = "ESP()", desc = "Mostra jogadores"}
+}
+
+-- Palavras-chave de anti-cheat
+local antiCheatKeywords = {
+    "kick(", "ban(", "detect", "anticheat", "anti_cheat", "anticheat",
+    "sheriff", "moderator", "admincheck", "validation", "verify",
+    "checkspeed", "checkfly", "checknoclip", "sanity", "report",
+    "logsuspicious", "flagged", "punish", "warn(", "exploit", "injection"
+}
+
+-- ============ TAB 2: REMOTES (com highlight e análise) ============
 local function scanRemotes()
     local count = 0
+    importantRemotes = {}
+    possibleExploits = {}
+    possibleExploitsCode = {}
+    
+    local function isImportant(name)
+        local n = name:lower()
+        for _, kw in ipairs(importantKeywords) do
+            if n:find(kw) then return true end
+        end
+        return false
+    end
+    
+    local function findExploit(name)
+        local n = name:lower()
+        for _, pattern in ipairs(exploitPatterns) do
+            for _, kw in ipairs(pattern.pattern) do
+                if n:find(kw) then
+                    return pattern
+                end
+            end
+        end
+        return nil
+    end
+    
     local function scan(parent, path)
         for _, obj in pairs(parent:GetChildren()) do
             pcall(function()
                 local p = path .. "/" .. obj.Name
+                local isImp = isImportant(obj.Name)
+                local exploit = findExploit(obj.Name)
+                
                 if obj:IsA("RemoteEvent") then
-                    appendTab(2, "🔴 RemoteEvent: " .. obj.Name .. "\n   Path: " .. p .. "\n\n")
                     count = count + 1
+                    if isImp then
+                        appendTab(2, "<font color='\"#FF4757\"'>🔴 [!!! IMPORTANTE !!!] RemoteEvent: " .. obj.Name .. "\n   Path: " .. p .. "\n</font>\n")
+                        table.insert(importantRemotes, {name = obj.Name, path = p, type = "RemoteEvent"})
+                    else
+                        appendTab(2, "🔴 RemoteEvent: " .. obj.Name .. "\n   Path: " .. p .. "\n\n")
+                    end
+                    if exploit then
+                        appendTab(2, "<font color='\"#FF6B6B\"'>   💣 POSSÍVEL EXPLOIT: " .. exploit.desc .. "\n   Sugestão: " .. exploit.suggestion .. "\n</font>\n")
+                        table.insert(possibleExploits, {remote = obj.Name, path = p, exploit = exploit})
+                    end
                 elseif obj:IsA("RemoteFunction") then
-                    appendTab(2, "🟡 RemoteFunction: " .. obj.Name .. "\n   Path: " .. p .. "\n\n")
                     count = count + 1
+                    if isImp then
+                        appendTab(2, "<font color='\"#FF4757\"'>🟡 [!!! IMPORTANTE !!!] RemoteFunction: " .. obj.Name .. "\n   Path: " .. p .. "\n</font>\n")
+                        table.insert(importantRemotes, {name = obj.Name, path = p, type = "RemoteFunction"})
+                    else
+                        appendTab(2, "🟡 RemoteFunction: " .. obj.Name .. "\n   Path: " .. p .. "\n\n")
+                    end
+                    if exploit then
+                        appendTab(2, "<font color='\"#FF6B6B\"'>   💣 POSSÍVEL EXPLOIT: " .. exploit.desc .. "\n   Sugestão: " .. exploit.suggestion .. "\n</font>\n")
+                        table.insert(possibleExploits, {remote = obj.Name, path = p, exploit = exploit})
+                    end
                 elseif obj:IsA("UnreliableRemoteEvent") then
-                    appendTab(2, "🟠 UnreliableRemote: " .. obj.Name .. "\n   Path: " .. p .. "\n\n")
                     count = count + 1
+                    appendTab(2, "🟠 UnreliableRemote: " .. obj.Name .. "\n   Path: " .. p .. "\n\n")
                 elseif obj:IsA("BindableEvent") then
                     appendTab(2, "🟢 BindableEvent: " .. obj.Name .. "\n   Path: " .. p .. "\n\n")
-                    count = count + 1
                 elseif obj:IsA("BindableFunction") then
                     appendTab(2, "🔵 BindableFunction: " .. obj.Name .. "\n   Path: " .. p .. "\n\n")
-                    count = count + 1
                 end
                 scan(obj, p)
             end)
@@ -232,7 +646,27 @@ local function scanRemotes()
         scan(player, "Players/" .. player.Name)
     end)
 
-    appendTab(2, "\n--- Total: " .. count .. " remotes encontrados ---\n")
+    -- Resumo de importantes
+    if #importantRemotes > 0 then
+        appendTab(2, "\n\n🔥━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━🔥\n")
+        appendTab(2, "🔥 POSSÍVEIS REMOTES IMPORTANTES (" .. #importantRemotes .. ")\n")
+        appendTab(2, "🔥━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━🔥\n\n")
+        for _, r in ipairs(importantRemotes) do
+            appendTab(2, "<font color='\"#FF4757\"'>[!!!] " .. r.name .. "\n   " .. r.path .. "\n   Tipo: " .. r.type .. "\n</font>\n")
+        end
+    end
+    
+    -- Resumo de exploits
+    if #possibleExploits > 0 then
+        appendTab(2, "\n\n💣━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━💣\n")
+        appendTab(2, "💣 POSSÍVEIS EXPLOITS ENCONTRADOS (" .. #possibleExploits .. ")\n")
+        appendTab(2, "💣━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━💣\n\n")
+        for _, e in ipairs(possibleExploits) do
+            appendTab(2, "<font color='\"#FF6B6B\"'>💣 Remote: " .. e.remote .. "\n   Path: " .. e.path .. "\n   Tipo: " .. e.exploit.desc .. "\n   Código: game." .. e.path:gsub("/", ".") .. ":FireServer(" .. (e.exploit.argType == "number" and "999999" or e.exploit.argType == "nil" and "" or "arg1") .. ")\n</font>\n")
+        end
+    end
+
+    appendTab(2, "\n\n--- Total: " .. count .. " remotes encontrados ---\n")
 end
 
 -- ============ TAB 3: VALORES (IntValue, StringValue, BoolValue, Attributes) ============
@@ -546,6 +980,25 @@ local spyConnections = {}
 
 local function startSpy()
     spyEnabled = true
+    riskScore = 0 -- Reset risk score
+    
+    -- Ativar interceptadores de comportamento
+    setupBehaviorInterceptor()
+    setupPlayerMonitor()
+    setupLoopDetector()
+    
+    appendTab(7, "\n")
+    appendTab(7, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+    appendTab(7, "🛡️ SISTEMA DE ANÁLISE COMPORTAMENTAL ATIVO\n")
+    appendTab(7, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n")
+    appendTab(7, "📊 Monitorando:\n")
+    appendTab(7, "  • FireServer/InvokeServer\n")
+    appendTab(7, "  • Alterações de player (WalkSpeed, etc)\n")
+    appendTab(7, "  • Loops suspeitos\n")
+    appendTab(7, "  • Valores extremos\n")
+    appendTab(7, "\n⚠️ Score de Risco atual: 0\n")
+    appendTab(7, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n")
+    updateTab(7)
     appendTab(7, "🟢 Spy ativo - monitorando remotes...\n\n")
     updateTab(7)
 
@@ -603,61 +1056,57 @@ end
 
 local function stopSpy()
     spyEnabled = false
+    _loopDetectorRunning = false
+    
     for _, c in pairs(spyConnections) do pcall(function() c:Disconnect() end) end
     spyConnections = {}
-    appendTab(7, "\n🔴 Spy desativado.\n")
-    updateTab(7)
-end
-
--- ============ EXECUTAR SCANS ============
-task.spawn(function()
-    -- Tab 1: Estrutura (mais servicos)
-    local structServices = {
-        {workspace, "Workspace", 4},
-        {game:GetService("ReplicatedStorage"), "ReplicatedStorage", 4},
-        {game:GetService("StarterGui"), "StarterGui", 3},
-    }
-    pcall(function() table.insert(structServices, {game:GetService("ReplicatedFirst"), "ReplicatedFirst", 3}) end)
-    pcall(function() table.insert(structServices, {game:GetService("StarterPlayer"), "StarterPlayer", 3}) end)
-    pcall(function() table.insert(structServices, {game:GetService("Lighting"), "Lighting", 3}) end)
-    pcall(function() table.insert(structServices, {game:GetService("SoundService"), "SoundService", 2}) end)
-
-    for _, svc in ipairs(structServices) do
-        appendTab(1, "\n=== " .. svc[2]:upper() .. " ===\n\n")
-        for _, child in pairs(svc[1]:GetChildren()) do
-            pcall(function() scanStructure(child, svc[2], 0, svc[3]) end)
+    
+    appendTab(7, "\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+    appendTab(7, "📊 RESUMO FINAL\n")
+    appendTab(7, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n")
+    
+    local scoreColor = "#00FF00"
+    local scoreText = "🟢 SEGURO"
+    if riskScore >= 30 then
+        scoreColor = "#FF0000"
+        scoreText = "🔴 PERIGOSO"
+    elseif riskScore >= 10 then
+        scoreColor = "#FFD700"
+        scoreText = "🟡 SUSPEITO"
+    end
+    
+    appendTab(7, string.format("⚠️ Score Final: <font color='\"%s\"'>%d</font> (%s)\n\n", scoreColor, riskScore, scoreText))
+    
+    local totalFire = 0
+    local totalInvoke = 0
+    for name, count in pairs(behaviorLog.remotesFired) do totalFire = totalFire + count end
+    for name, count in pairs(behaviorLog.remotesInvoked) do totalInvoke = totalInvoke + count end
+    
+    appendTab(7, string.format("📡 FireServer: %d | 📞 InvokeServer: %d\n\n", totalFire, totalInvoke))
+    
+    if next(behaviorLog.remotesFired) then
+        appendTab(7, "🔥 Top Remotes:\n")
+        local sorted = {}
+        for name, count in pairs(behaviorLog.remotesFired) do
+            table.insert(sorted, {name = name, count = count})
+        end
+        table.sort(sorted, function(a, b) return a.count > b.count end)
+        for i, entry in ipairs(sorted) do
+            if i <= 5 then
+                appendTab(7, string.format("   %d x %s\n", entry.count, entry.name))
+            end
         end
     end
-    updateTab(1)
+    
+    appendTab(7, "\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+    appendTab(7, "🛡️ Monitoramento parado\n")
+    appendTab(7, "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n")
+    updateTab(7)
+    
+    cleanupPlayerMonitor()
+end
 
-    -- Tab 2: Remotes
-    scanRemotes()
-    updateTab(2)
 
-    -- Tab 3: Valores
-    scanValues()
-    updateTab(3)
-
-    -- Tab 4: Objetos 3D
-    scanObjects()
-    updateTab(4)
-
-    -- Tab 5: Player
-    scanPlayer()
-    updateTab(5)
-
-    -- Tab 6: Scripts
-    scanScripts()
-    updateTab(6)
-
-    -- Tab 7: Spy (inicia automaticamente)
-    startSpy()
-
-    local gameName = "?"
-    pcall(function() gameName = game:GetService("MarketplaceService"):GetProductInfo(game.PlaceId).Name end)
-    Title.Text = "🔍 Game Analyzer - Concluído! (" .. gameName .. ")"
-    Title.TextColor3 = Color3.fromRGB(180, 140, 255)
-end)
 
 -- ============ BOTOES ============
 local currentTab = 1
