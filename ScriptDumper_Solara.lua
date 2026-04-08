@@ -1,23 +1,45 @@
--- SPY + IMPACTO COMBINADO
+-- SIMPLE REMOTE LOGGER (SEM ERRO)
 
-local mt = getrawmetatable(game)
-local old = mt.__namecall
+print("Spy simples iniciado")
 
-setreadonly(mt,false)
+local function monitorRemote(obj)
+    if obj:IsA("RemoteEvent") then
+        
+        obj.OnClientEvent:Connect(function(...)
+            print("\n📡 RECEBIDO DO SERVIDOR:")
+            print("Remote:", obj:GetFullName())
 
-mt.__namecall = newcclosure(function(self,...)
-    local method = getnamecallmethod()
-    local args = {...}
+            local args = {...}
+            for i,v in ipairs(args) do
+                print("Arg",i,":",v)
+            end
+        end)
 
-    if method == "FireServer" then
-        print("📡 Remote:", self:GetFullName())
+    elseif obj:IsA("RemoteFunction") then
+        
+        local old = obj.OnClientInvoke
+        obj.OnClientInvoke = function(...)
+            print("\n📞 INVOKE DO SERVIDOR:")
+            print("Remote:", obj:GetFullName())
 
-        for i,v in ipairs(args) do
-            print("Arg",i,":",v)
+            local args = {...}
+            for i,v in ipairs(args) do
+                print("Arg",i,":",v)
+            end
+
+            if old then
+                return old(...)
+            end
         end
     end
+end
 
-    return old(self,...)
+-- SCAN
+for _,v in pairs(game:GetDescendants()) do
+    monitorRemote(v)
+end
+
+-- NOVOS REMOTES
+game.DescendantAdded:Connect(function(v)
+    monitorRemote(v)
 end)
-
-setreadonly(mt,true)
