@@ -1,34 +1,23 @@
--- DETECTOR DE IMPACTO / FÍSICA
+-- SPY + IMPACTO COMBINADO
 
-print("Detector de impacto iniciado")
+local mt = getrawmetatable(game)
+local old = mt.__namecall
 
-local players = game:GetService("Players")
+setreadonly(mt,false)
 
-local function monitorCharacter(char)
-    local root = char:WaitForChild("HumanoidRootPart")
+mt.__namecall = newcclosure(function(self,...)
+    local method = getnamecallmethod()
+    local args = {...}
 
-    local lastVel = root.AssemblyLinearVelocity
+    if method == "FireServer" then
+        print("📡 Remote:", self:GetFullName())
 
-    game:GetService("RunService").Heartbeat:Connect(function()
-        local vel = root.AssemblyLinearVelocity
-
-        local diff = (vel - lastVel).Magnitude
-
-        if diff > 50 then
-            print("💥 IMPACTO DETECTADO EM:", char.Name)
-            print("Velocidade atual:", vel)
-            print("Mudança:", diff)
-            print("-----------------------")
+        for i,v in ipairs(args) do
+            print("Arg",i,":",v)
         end
-
-        lastVel = vel
-    end)
-end
-
-for _,plr in pairs(players:GetPlayers()) do
-    if plr.Character then
-        monitorCharacter(plr.Character)
     end
 
-    plr.CharacterAdded:Connect(monitorCharacter)
-end
+    return old(self,...)
+end)
+
+setreadonly(mt,true)
